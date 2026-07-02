@@ -38,16 +38,20 @@ GEMINI_URL = (f"https://generativelanguage.googleapis.com/v1beta/models/"
 
 # 변경 포인트 1: 단일 prompt 대신 chat_history(리스트)를 받도록 수정
 def call_gemini(chat_history):
-    # API 규격에 맞는 payload 구조 생성
     payload = {"contents": chat_history}
     try:
         resp = requests.post(GEMINI_URL, json=payload, timeout=30)
         resp.raise_for_status()
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
     except requests.exceptions.HTTPError as e:
-        return f"❌ HTTP 오류: {e.response.status_code} {e.response.text}"
+        # 429 에러(할당량 초과)일 때 API 키 노출 방지를 위한 커스텀 메시지
+        if e.response.status_code == 429:
+            return "⏳ <b>[트래픽 초과]</b> 현재 동시에 많은 사용자가 이용 중이거나 무료 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+        
+        # 기타 에러 발생 시에도 API 키가 섞여 나올 수 있으므로, 에러 본문 대신 상태 코드만 안전하게 노출
+        return f"❌ <b>[서버 오류]</b> API 요청 중 문제가 발생했습니다. (오류 코드: {e.response.status_code})"
     except Exception as e:
-        return f"❌ API 통신 오류: {e}"
+        return "❌ <b>[연결 오류]</b> AI 서버와 통신할 수 없습니다. 네트워크 상태를 확인해 주세요."
 
 for key, default in [("vth_val", 1.0), ("vgs_val", 2.6), ("vds_val", 3.7)]:
     if key not in st.session_state:
