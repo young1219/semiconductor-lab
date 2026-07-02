@@ -380,13 +380,8 @@ with col_right:
 5. 마지막 줄은 아래 형식으로 능동 질문 1개와 정답 접기(Toggle)를 포함할 것:
    "🤔 직접 생각해보기: [슬라이더 조작 유도 질문]"
    
-   그 바로 아래 줄에 아래 마크다운 문법을 그대로 사용하여 정답과 물리학적 이유를 숨겨둘 것:
-   <details>
-   <summary>💡 정답 및 해설 확인하기</summary>
-   <div style="padding: 10px; background: #f8fafc; border-radius: 4px; margin-top: 5px;">
-   [여기에 질문에 대한 명확한 정답과 이유를 1~2문장으로 작성]
-   </div>
-   </details>
+   그 바로 아래 줄에 아래 HTML 문법을 줄바꿈(Enter) 없이 '한 줄로 바짝 붙여서' 출력할 것 (태그 사이에 빈 줄이나 공백이 있으면 디자인이 깨집니다):
+   <details><summary>💡 정답 및 해설 확인하기</summary><div style="padding:12px; background:#f8fafc; border-radius:6px; margin-top:4px; color:#334155;">[여기에 질문에 대한 명확한 정답과 이유를 1~2문장으로 작성]</div></details>
 6. 한국어로만 답변하고 영어 문장, 프랑스어, 한자 등 다른 언어를 절대 섞지 말 것.
 7. 숫자들이 서로 모순되지 않는지 속으로 검산한 뒤(검산 과정 자체는 출력하지 말 것), 결과만 자연스럽게 설명에 반영할 것.
 8. 비유를 한 개 사용할 것. 수도꼭지, 도로 정체, 좁아지는 터널 등 학생이 즉시 그림을 그릴 수 있는 일상 비유여야 함.
