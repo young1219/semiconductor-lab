@@ -400,8 +400,11 @@ with col_right:
 "{question}"
 """
         
-        # 2. 💡 [중요] 이전 대화 기록에 새로운 질문 추가 (user 역할)
-        # 단, 첫 질문에는 역할 지침(system_instruction)을 섞어서 보내는 것이 좋습니다.
+        # 💡 [방어 코드] 대화 기록이 너무 길어지면 최신 6개(3턴)만 남기고 자르기
+        # API 사용량(토큰) 과다로 인한 429 에러를 방지합니다.
+        if len(st.session_state["chat_history"]) > 6:
+            st.session_state["chat_history"] = st.session_state["chat_history"][-6:]
+            
         full_user_content = f"{system_instruction}\n\n[학생 질문]\n\"{question}\"" if not st.session_state["chat_history"] else question
         
         st.session_state["chat_history"].append({
