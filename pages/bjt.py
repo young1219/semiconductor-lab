@@ -727,6 +727,7 @@ with col3:
             with st.spinner("AI가 분석 중입니다..."):
                 try:
                     import google.generativeai as genai
+                    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
                     model = genai.GenerativeModel('gemini-2.5-flash')
                     resp  = model.generate_content(system_instruction)
                     st.markdown(f"""
