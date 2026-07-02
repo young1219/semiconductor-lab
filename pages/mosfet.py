@@ -36,8 +36,10 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 GEMINI_URL = (f"https://generativelanguage.googleapis.com/v1beta/models/"
               f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
 
-def call_gemini(prompt):
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+# 변경 포인트 1: 단일 prompt 대신 chat_history(리스트)를 받도록 수정
+def call_gemini(chat_history):
+    # API 규격에 맞는 payload 구조 생성
+    payload = {"contents": chat_history}
     try:
         resp = requests.post(GEMINI_URL, json=payload, timeout=30)
         resp.raise_for_status()
@@ -50,6 +52,10 @@ def call_gemini(prompt):
 for key, default in [("vth_val", 1.0), ("vgs_val", 2.6), ("vds_val", 3.7)]:
     if key not in st.session_state:
         st.session_state[key] = default
+
+# 변경 포인트 2: 세션 상태에 대화 기록 저장 공간(배열) 초기화
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 with st.sidebar:
     if st.button("⬅ 홈으로 돌아가기", use_container_width=True):
@@ -72,7 +78,18 @@ with st.sidebar:
     st.sidebar.divider()
     st.markdown("<span style='font-size:0.8rem;font-weight:700;color:#1e293b;'>🤖 ASK AI</span>", unsafe_allow_html=True)
     user_question = st.text_area("", height=80, placeholder="e.g. 현재 전압 조건 상태에 대해 물리적으로 쉽게 설명해줘.", label_visibility="collapsed")
-    ask_btn = st.button("🤖 AI 실시간 해설 보기", use_container_width=True, type="primary")
+    
+    # 레이아웃 정리를 위해 버튼 배치 조정 가능
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        ask_btn = st.button("🤖 AI 해설 보기", use_container_width=True, type="primary")
+    with col_btn2:
+        # 대화가 꼬이거나 리셋하고 싶을 때를 위한 리셋 버튼 추가
+        clear_btn = st.button("🔄 대화 리셋", use_container_width=True)
+        if clear_btn:
+            st.session_state.chat_history = []
+            st.session_state.gemini_response = ""
+            st.rerun()
 
 def calc_mosfet(device, vgs, vds, vth, Kn=1.0, Kp=1.0):
     if device == "NMOS":
@@ -137,10 +154,10 @@ with col_left:
     fig_struct, ax = plt.subplots(figsize=(5, 4.5))
     ax.set_xlim(0, 10); ax.set_ylim(0, 8.5); ax.axis("off")
     fig_struct.patch.set_facecolor('white')
-    sub_color  = "#c8dff0" if device=="NMOS" else "#fce4d6"
-    sub_edge   = "#5a8abf" if device=="NMOS" else "#e67e22"
-    sub_text   = "p-Substrate" if device=="NMOS" else "n-Substrate"
-    sub_tc     = "#2c5f8a" if device=="NMOS" else "#a04000"
+    sub_color   = "#c8dff0" if device=="NMOS" else "#fce4d6"
+    sub_edge    = "#5a8abf" if device=="NMOS" else "#e67e22"
+    sub_text    = "p-Substrate" if device=="NMOS" else "n-Substrate"
+    sub_tc      = "#2c5f8a" if device=="NMOS" else "#a04000"
     well_text  = "n+" if device=="NMOS" else "p+"
     well_color = "#4caf7d" if device=="NMOS" else "#9b59b6"
     well_edge  = "#2e7d52" if device=="NMOS" else "#8e44ad"
@@ -191,7 +208,6 @@ with col_left:
 with col_mid:
     st.markdown("<div class='section-header'>📈 특성 곡선 & 밴드 다이어그램</div>", unsafe_allow_html=True)
 
-    # ── I-V 특성 곡선 ──────────────────────────────────────
     v_ax = np.linspace(0, 5, 300)
     i_ax = [calc_mosfet(device, vgs, vd, vth)[1] for vd in v_ax]
     vgs_for_boundary = np.linspace(vth+0.01, 5.0, 300)
@@ -217,23 +233,14 @@ with col_mid:
     fig_iv.update_yaxes(showgrid=True,gridcolor='#f1f5f9')
     st.plotly_chart(fig_iv,use_container_width=True,theme="streamlit")
 
-    # ════════════════════════════════════════════════════════
-    #  에너지 밴드 다이어그램 (Source–Channel–Drain 측면 방향)
-    #  E_F 기준:  NMOS 소스/드레인 = n+ → E_F ~ E_c
-    #             PMOS 소스/드레인 = p+ → E_F ~ E_v
-    #  게이트:    채널 장벽 변조 (Cutoff = 큰 장벽 / 반전 = 장벽 제거)
-    #  V_DS:      NMOS 드레인 밴드 하강 / PMOS 드레인 밴드 상승,
-    #             소스·드레인 E_F 를 qV_DS 만큼 분리
-    #  Saturation: 드레인 근처 강하 집중(핀치오프)
-    # ════════════════════════════════════════════════════════
     Eg       = 1.12
-    SCALE    = 0.22     # eV/V 표시 배율
-    MAX_DROP = 1.10     # 최대 표시 강하량 (eV)
-    DELTA    = 0.12     # |E_c-E_F|(n+) 또는 |E_F-E_v|(p+)
-    Y_OFF    = 2.2      # 표시용 오프셋(물리 의미 없음, y축 양수 유지)
+    SCALE    = 0.22     
+    MAX_DROP = 1.10     
+    DELTA    = 0.12     
+    Y_OFF    = 2.2      
 
     abs_vds   = abs(vds)
-    overdrive = abs(vgs) - abs(vth)                  # >0 : 반전(채널 형성)
+    overdrive = abs(vgs) - abs(vth)                  
     V         = float(min(abs_vds * SCALE, MAX_DROP))
 
     if region == "Cutoff":
@@ -247,46 +254,37 @@ with col_mid:
     x_ch  = np.linspace(1.0, 2.0, 140)
     x_drn = np.linspace(2.0, 3.0, 50)
     t     = np.linspace(0.0, 1.0, len(x_ch))
-    drop  = t ** n_exp          # V_DS 강하 분포
-    # 차단 시 채널 내 V_DS 강하 제거 → 장벽이 평탄하게 유지되고
-    #   V_DS 강하는 드레인 접합(x=2~3)에만 반영됨
+    drop  = t ** n_exp          
     if region == "Cutoff":
         drop = np.zeros_like(t)
 
-    # 차단 장벽: 소스 쪽에서 올라가 plateau 유지 (sin hump 아님)
-    #   smoothstep 으로 0→1 상승 후 채널 내내 그 높이 유지
     s         = np.clip(t / 0.35, 0.0, 1.0)
-    barrier_p = s * s * (3 - 2 * s)        # 0→1 부드럽게 올라가 유지
+    barrier_p = s * s * (3 - 2 * s)        
 
-    # 드레인 접합 천이: 채널 끝 높이 → 드레인 레벨로 smoothstep 하강
-    #   (상수로 채우면 채널 끝과 점프가 생겨 ㄱ자 절벽이 됨)
     td      = np.linspace(0.0, 1.0, len(x_drn))
-    sd      = td * td * (3 - 2 * td)        # 0→1 smoothstep
+    sd      = td * td * (3 - 2 * td)        
 
     if device == "NMOS":
-        EF_src, EF_drn = Y_OFF, Y_OFF - V            # 드레인 전위↑ → E_F↓
-        ec_src_lvl = EF_src + DELTA                  # n+ : E_F ~ E_c (소스)
-        ec_drn_lvl = EF_drn + DELTA                  # n+ : E_F ~ E_c (드레인)
+        EF_src, EF_drn = Y_OFF, Y_OFF - V            
+        ec_src_lvl = EF_src + DELTA                  
+        ec_drn_lvl = EF_drn + DELTA                  
         ec_ch  = ec_src_lvl + h_barrier * barrier_p - V * drop
-        # 채널 끝 → 드레인 레벨(E_F+DELTA) 로 smoothstep 천이
-        #   모든 영역 공통: 드레인 밴드는 항상 E_F 에서 DELTA 간격 유지
         ec_drn = ec_ch[-1] + (ec_drn_lvl - ec_ch[-1]) * sd
         ec_all = np.concatenate([np.full_like(x_src, ec_src_lvl), ec_ch, ec_drn])
         ev_all = ec_all - Eg
-        po_band = ec_all                              # NMOS 핀치오프는 E_c
-    else:  # PMOS
-        EF_src, EF_drn = Y_OFF, Y_OFF + V            # 드레인 전위↓ → E_F↑
-        ev_src_lvl = EF_src - DELTA                  # p+ : E_F ~ E_v (소스)
-        ev_drn_lvl = EF_drn - DELTA                  # p+ : E_F ~ E_v (드레인)
+        po_band = ec_all                              
+    else:  
+        EF_src, EF_drn = Y_OFF, Y_OFF + V            
+        ev_src_lvl = EF_src - DELTA                  
+        ev_drn_lvl = EF_drn - DELTA                  
         ev_ch  = ev_src_lvl - h_barrier * barrier_p + V * drop
-        # 채널 끝 → 드레인 레벨(E_F-DELTA) 로 smoothstep 천이
         ev_drn = ev_ch[-1] + (ev_drn_lvl - ev_ch[-1]) * sd
         ev_all = np.concatenate([np.full_like(x_src, ev_src_lvl), ev_ch, ev_drn])
         ec_all = ev_all + Eg
-        po_band = ev_all                              # PMOS 핀치오프는 E_v
+        po_band = ev_all                              
 
     x_all = np.concatenate([x_src, x_ch, x_drn])
-    ci    = len(x_src) + len(x_ch) // 2              # 채널 중앙 인덱스
+    ci    = len(x_src) + len(x_ch) // 2              
     ch_mid_y = float((ec_all[ci] + ev_all[ci]) / 2)
 
     fig_band = go.Figure()
@@ -301,7 +299,6 @@ with col_mid:
                                   line=dict(color='purple', width=1.8, dash='dot'),
                                   name="E<sub>F</sub> (Drain)"))
 
-    # Eg 화살표
     fig_band.add_annotation(x=0.15, y=ec_all[0], ay=ev_all[0], axref='x', ayref='y',
                             xref='x', yref='y', arrowhead=2, arrowsize=1,
                             arrowwidth=1.2, arrowcolor='gray', ax=0.15)
@@ -343,18 +340,22 @@ with col_mid:
                    font=dict(size=12, color="#64748b"), x=0.5, y=0.95, xanchor='center'))
     st.plotly_chart(fig_band, use_container_width=True, theme="streamlit")
 
+
+# 변경 포인트 3: AI 해설 영역 수정 (과거 대화 축소 및 누적)
 with col_right:
     st.markdown("<div class='section-header'>🤖 AI 해설</div>", unsafe_allow_html=True)
     if "gemini_response" not in st.session_state:
         st.session_state.gemini_response = ""
+        
     if ask_btn:
         question = (user_question.strip() if user_question.strip()
                     else f"현재 {device} MOSFET 조건에 대해 물리적으로 쉽게 설명해줘.")
+        
+        # 이번 턴에 주입할 개별 프롬프트 생성
         full_prompt = f"""
 [역할]
 당신은 전자정보공학부 학부생 전담 AI 튜터입니다.
-청중: 물리전자, 반도체소자, 전자회로, 응용회로실험 등의 전공 과목을 듣는 대학생으로, MOSFET 동작 영역(Cutoff/Linear/Saturation) 용어는 배웠지만 '왜' 핀치오프가 일어나는지는 직관이 아직 부족한 상태입니다.
-교재에 실린 일반 이론을 반복하는 것이 아니라, 지금 이 화면에 나타난 수치와 그래프를 출발점으로 삼아 이야기하세요.
+이전 질문 및 답변의 흐름을 기억하고 연속해서 친절하게 답변하되, 질문자가 파라미터(V_GS, V_DS 등)를 바꾸거나 추가 질문을 던지면 그 맥락에 맞춰 자연스럽게 이어가세요.
 
 [현재 시뮬레이터 상태]
 - 소자 종류 : {device} MOSFET
@@ -383,12 +384,27 @@ with col_right:
 8. 비유를 한 개 사용할 것. 수도꼭지, 도로 정체, 좁아지는 터널 등 학생이 즉시 그림을 그릴 수 있는 일상 비유여야 함.
    비유를 먼저 제시하고, 그 다음 실제 물리 현상으로 연결할 것.
 9. 학생 질문에 우선적으로 대답할 것.
+10. 필요시 이전 대화 내용 흐름을 참고하여 대답할 것.
 
 [학생 질문]
 "{question}"
 """
+        # 현재 질문을 규격에 맞춰 세션 기록에 추가
+        st.session_state.chat_history.append({"role": "user", "parts": [{"text": full_prompt}]})
+        
+        # 슬라이싱(축소): 과거 대화 기록을 최신 4개(질문 2개, 답변 2개 분량)로 제한하여 토큰 세이브
+        # 단, 리스트 개수가 부족하면 있는 만큼만 보냅니다.
+        recent_history = st.session_state.chat_history[-4:]
+        
         with st.spinner("Gemini analyzing..."):
-            st.session_state.gemini_response = call_gemini(full_prompt)
+            # 가공된 최근 대화 배열 전체를 API에 전달
+            response_text = call_gemini(recent_history)
+            
+            # API 호출이 성공한 경우에만 답변 기록을 세션에 추가
+            if "❌" not in response_text:
+                st.session_state.chat_history.append({"role": "model", "parts": [{"text": response_text}]})
+            st.session_state.gemini_response = response_text
+            
     if st.session_state.gemini_response:
         st.markdown(f"""
         <div style='background:#ffffff;padding:16px;border-radius:10px;
