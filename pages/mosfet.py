@@ -36,19 +36,16 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 GEMINI_URL = (f"https://generativelanguage.googleapis.com/v1beta/models/"
               f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
 
-# 변경 포인트 1: 단일 prompt 대신 chat_history(리스트)를 받도록 수정
-def call_gemini(chat_history):
-    payload = {"contents": chat_history}
+def call_gemini(prompt):
+    # Gemini API 형식에 맞춰 1회성 구조(contents -> parts -> text)로 전달합니다.
+    payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
     try:
         resp = requests.post(GEMINI_URL, json=payload, timeout=30)
         resp.raise_for_status()
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
     except requests.exceptions.HTTPError as e:
-        # 429 에러(할당량 초과)일 때 API 키 노출 방지를 위한 커스텀 메시지
         if e.response.status_code == 429:
             return "⏳ <b>[트래픽 초과]</b> 현재 동시에 많은 사용자가 이용 중이거나 무료 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
-        
-        # 기타 에러 발생 시에도 API 키가 섞여 나올 수 있으므로, 에러 본문 대신 상태 코드만 안전하게 노출
         return f"❌ <b>[서버 오류]</b> API 요청 중 문제가 발생했습니다. (오류 코드: {e.response.status_code})"
     except Exception as e:
         return "❌ <b>[연결 오류]</b> AI 서버와 통신할 수 없습니다. 네트워크 상태를 확인해 주세요."
@@ -56,10 +53,6 @@ def call_gemini(chat_history):
 for key, default in [("vth_val", 1.0), ("vgs_val", 2.6), ("vds_val", 3.7)]:
     if key not in st.session_state:
         st.session_state[key] = default
-
-# 변경 포인트 2: 세션 상태에 대화 기록 저장 공간(배열) 초기화
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
 
 with st.sidebar:
     if st.button("⬅ 홈으로 돌아가기", use_container_width=True):
@@ -84,16 +77,8 @@ with st.sidebar:
     user_question = st.text_area("", height=80, placeholder="e.g. 현재 전압 조건 상태에 대해 물리적으로 쉽게 설명해줘.", label_visibility="collapsed")
     
     # 레이아웃 정리를 위해 버튼 배치 조정 가능
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        ask_btn = st.button("🤖 AI 해설 보기", use_container_width=True, type="primary")
-    with col_btn2:
-        # 대화가 꼬이거나 리셋하고 싶을 때를 위한 리셋 버튼 추가
-        clear_btn = st.button("🔄 대화 리셋", use_container_width=True)
-        if clear_btn:
-            st.session_state.chat_history = []
-            st.session_state.gemini_response = ""
-            st.rerun()
+    # 리셋 버튼을 없애고 AI 해설 보기 버튼이 가로를 모두 차지하도록 단일 버튼으로 변경합니다.
+    ask_btn = st.button("🤖 AI 해설 보기", use_container_width=True, type="primary")
 
 def calc_mosfet(device, vgs, vds, vth, Kn=1.0, Kp=1.0):
     if device == "NMOS":
@@ -359,7 +344,10 @@ with col_right:
         full_prompt = f"""
 [역할]
 당신은 전자정보공학부 학부생 전담 AI 튜터입니다.
-이전 질문 및 답변의 흐름을 기억하고 연속해서 친절하게 답변하되, 질문자가 파라미터(V_GS, V_DS 등)를 바꾸거나 추가 질문을 던지면 그 맥락에 맞춰 자연스럽게 이어가세요.
+청중: 물리전자, 반도체소자, 전자회로, 응용회로실험 등의 전공 과목을 듣는 대학생으로, MOSFET 동작 영역(Cutoff/Linear/Saturation)
+용어는 배웠지만 '왜' 핀치오프가 일어나는지는 직관이 아직 부족한 상태입니다.
+교재에 실린 일반 이론을 반복하는 것이 아니라,
+지금 이 화면에 나타난 수치와 그래프를 출발점으로 삼아 이야기하세요.
 
 [현재 시뮬레이터 상태]
 - 소자 종류 : {device} MOSFET
@@ -391,25 +379,13 @@ with col_right:
 8. 비유를 한 개 사용할 것. 수도꼭지, 도로 정체, 좁아지는 터널 등 학생이 즉시 그림을 그릴 수 있는 일상 비유여야 함.
    비유를 먼저 제시하고, 그 다음 실제 물리 현상으로 연결할 것.
 9. 학생 질문에 우선적으로 대답할 것.
-10. 필요시 이전 대화 내용 흐름을 참고하여 대답할 것.
 
 [학생 질문]
 "{question}"
 """
-        # 현재 질문을 규격에 맞춰 세션 기록에 추가
-        st.session_state.chat_history.append({"role": "user", "parts": [{"text": full_prompt}]})
-        
-        # 슬라이싱(축소): 과거 대화 기록을 최신 4개(질문 2개, 답변 2개 분량)로 제한하여 토큰 세이브
-        # 단, 리스트 개수가 부족하면 있는 만큼만 보냅니다.
-        recent_history = st.session_state.chat_history[-4:]
-        
+        # 기록 보관 및 슬라이싱 코드를 전부 지우고, 단발성으로 prompt만 넘겨 결과를 받습니다.
         with st.spinner("Gemini analyzing..."):
-            # 가공된 최근 대화 배열 전체를 API에 전달
-            response_text = call_gemini(recent_history)
-            
-            # API 호출이 성공한 경우에만 답변 기록을 세션에 추가
-            if "❌" not in response_text:
-                st.session_state.chat_history.append({"role": "model", "parts": [{"text": response_text}]})
+            response_text = call_gemini(full_prompt)
             st.session_state.gemini_response = response_text
             
     if st.session_state.gemini_response:
