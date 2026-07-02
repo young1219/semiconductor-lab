@@ -384,7 +384,7 @@ with col_right:
 "{question}"
 """
         # 기록 보관 및 슬라이싱 코드를 전부 지우고, 단발성으로 prompt만 넘겨 결과를 받습니다.
-        with st.spinner("AI가 분석 중입니다...")):
+        with st.spinner("AI가 분석 중입니다..."):
             response_text = call_gemini(full_prompt)
             st.session_state.gemini_response = response_text
             
