@@ -51,9 +51,6 @@ for key, default in [("vth_val", 1.0), ("vgs_val", 2.6), ("vds_val", 3.7)]:
     if key not in st.session_state:
         st.session_state[key] = default
 
-if "chat_history" not in st.session_state:
-    st.session_state["chat_history"] = []
-
 with st.sidebar:
     if st.button("⬅ 홈으로 돌아가기", use_container_width=True):
         st.switch_page("app.py")
@@ -350,19 +347,10 @@ with col_right:
     st.markdown("<div class='section-header'>🤖 AI 해설</div>", unsafe_allow_html=True)
     if "gemini_response" not in st.session_state:
         st.session_state.gemini_response = ""
-        
-    # 💡 대화 기록 리셋 버튼 추가 (선택 사항이지만 흐름을 새로 시작할 때 유용합니다)
-    if st.button("🔄 대화 기록 초기화", use_container_width=True):
-        st.session_state["chat_history"] = []
-        st.session_state.gemini_response = ""
-        st.rerun()
-
     if ask_btn:
         question = (user_question.strip() if user_question.strip()
                     else f"현재 {device} MOSFET 조건에 대해 물리적으로 쉽게 설명해줘.")
-        
-        # 1. 프롬프트 시스템 지침 (매 질문마다 프롬프트 규칙이 적용되도록 설정)
-        system_instruction = f"""
+        full_prompt = f"""
 [역할]
 당신은 전자정보공학부 학부생 전담 AI 튜터입니다.
 청중: 물리전자, 반도체소자, 전자회로, 응용회로실험 등의 전공 과목을 듣는 대학생으로, MOSFET 동작 영역(Cutoff/Linear/Saturation) 용어는 배웠지만 '왜' 핀치오프가 일어나는지는 직관이 아직 부족한 상태입니다.
@@ -399,39 +387,8 @@ with col_right:
 [학생 질문]
 "{question}"
 """
-        
-        # 💡 [방어 코드] 대화 기록이 너무 길어지면 최신 6개(3턴)만 남기고 자르기
-        # API 사용량(토큰) 과다로 인한 429 에러를 방지합니다.
-        if len(st.session_state["chat_history"]) > 6:
-            st.session_state["chat_history"] = st.session_state["chat_history"][-6:]
-            
-        full_user_content = f"{system_instruction}\n\n[학생 질문]\n\"{question}\"" if not st.session_state["chat_history"] else question
-        
-        st.session_state["chat_history"].append({
-            "role": "user",
-            "parts": [{"text": full_user_content}]
-        })
-
-        # 3. API 요청용 페이로드 조립 (누적된 대화 기록 전체를 전송)
-        payload = {"contents": st.session_state["chat_history"]}
-        
-        with st.spinner("Gemini 차트 및 대화 분석 중..."):
-            try:
-                resp = requests.post(GEMINI_URL, json=payload, timeout=30)
-                resp.raise_for_status()
-                ai_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-                
-                # 4. 💡 AI의 답변을 대화 기록에 추가 (model 역할)
-                st.session_state["chat_history"].append({
-                    "role": "model",
-                    "parts": [{"text": ai_text}]
-                })
-                st.session_state.gemini_response = ai_text
-                
-            except Exception as e:
-                st.error(f"❌ 오류 발생: {e}")
-
-    # 답변 출력 영역
+        with st.spinner("Gemini analyzing..."):
+            st.session_state.gemini_response = call_gemini(full_prompt)
     if st.session_state.gemini_response:
         st.markdown(f"""
         <div style='background:#ffffff;padding:16px;border-radius:10px;
